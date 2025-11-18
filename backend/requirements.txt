@@ -1,0 +1,11 @@
+flask==3.0.0
+flask-cors==4.0.0
+flask-socketio==5.3.5
+inference==0.23.0
+opencv-python==4.8.1.78
+requests==2.31.0
+python-socketio==5.11.0
+
+# For local YOLO training (optional)
+ultralytics==8.3.228
+roboflow==1.2.11

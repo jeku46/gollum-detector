@@ -48,3 +48,8 @@ coverage/
 # Misc
 .cache/
 *.tsbuildinfo
+
+# Python
+venv/
+*.pyc
+__pycache__/

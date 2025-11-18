@@ -1,0 +1,14 @@
+[Unit]
+Description=Gollum LED Control API
+After=network.target
+
+[Service]
+Type=simple
+User=gollum
+WorkingDirectory=/home/gollum/Projects/Blinker
+ExecStart=/usr/bin/python3 /home/gollum/Projects/Blinker/api.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

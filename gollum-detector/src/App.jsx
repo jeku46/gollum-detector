@@ -1,13 +1,25 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { io } from 'socket.io-client'
 import './App.css'
 
+const BACKEND_URL = 'http://localhost:5001'
+
 function App() {
+  // Mode: 'upload' or 'live'
+  const [mode, setMode] = useState('upload')
+
+  // Upload mode state
   const [selectedImage, setSelectedImage] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [isDragging, setIsDragging] = useState(false)
   const [isDetecting, setIsDetecting] = useState(false)
   const [detectionResult, setDetectionResult] = useState(null)
   const [error, setError] = useState(null)
+
+  // Live detection state
+  const [cameraActive, setCameraActive] = useState(false)
+  const [liveDetection, setLiveDetection] = useState(null)
+  const socketRef = useRef(null)
 
   const handleImageSelect = async (file) => {
     if (file && file.type.startsWith('image/')) {
@@ -127,15 +139,98 @@ function App() {
     setError(null)
   }
 
+  // WebSocket connection for live detection
+  useEffect(() => {
+    if (mode === 'live') {
+      socketRef.current = io(BACKEND_URL)
+
+      socketRef.current.on('connected', (data) => {
+        console.log('WebSocket connected:', data)
+      })
+
+      socketRef.current.on('detection', (data) => {
+        console.log('Detection event:', data)
+        setLiveDetection(data)
+      })
+
+      return () => {
+        if (socketRef.current) {
+          socketRef.current.disconnect()
+        }
+      }
+    }
+  }, [mode])
+
+  const startCamera = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/start_camera`, {
+        method: 'POST'
+      })
+      const data = await response.json()
+      if (data.status === 'started' || data.status === 'already_running') {
+        setCameraActive(true)
+        setLiveDetection(null)
+      }
+    } catch (err) {
+      console.error('Failed to start camera:', err)
+      setError('Failed to start camera')
+    }
+  }
+
+  const stopCamera = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/stop_camera`, {
+        method: 'POST'
+      })
+      const data = await response.json()
+      if (data.status === 'stopped' || data.status === 'not_running') {
+        setCameraActive(false)
+        setLiveDetection(null)
+      }
+    } catch (err) {
+      console.error('Failed to stop camera:', err)
+      setError('Failed to stop camera')
+    }
+  }
+
+  const switchMode = (newMode) => {
+    // Stop camera when switching modes
+    if (mode === 'live' && cameraActive) {
+      stopCamera()
+    }
+    setMode(newMode)
+    setError(null)
+    setDetectionResult(null)
+    setLiveDetection(null)
+  }
+
   return (
     <div className="app">
       <header className="app-header">
         <h1>Gollum Detector</h1>
-        <p className="subtitle">Upload an image to detect if Gollum is present</p>
+        <p className="subtitle">
+          {mode === 'upload' ? 'Upload an image to detect if Gollum is present' : 'Live webcam detection'}
+        </p>
+
+        <div className="mode-switcher">
+          <button
+            className={`mode-button ${mode === 'upload' ? 'active' : ''}`}
+            onClick={() => switchMode('upload')}
+          >
+            Image Upload
+          </button>
+          <button
+            className={`mode-button ${mode === 'live' ? 'active' : ''}`}
+            onClick={() => switchMode('live')}
+          >
+            Live Detection
+          </button>
+        </div>
       </header>
 
       <main className="app-main">
-        {!previewUrl ? (
+        {mode === 'upload' ? (
+          !previewUrl ? (
           <div
             className={`upload-zone ${isDragging ? 'dragging' : ''}`}
             onDragOver={handleDragOver}
@@ -214,6 +309,66 @@ function App() {
                     <div className="gollum-not-found">gollum not found</div>
                   )
                 })()}
+              </div>
+            )}
+          </div>
+        )
+        ) : (
+          // Live Detection Mode
+          <div className="live-container">
+            <div className="video-wrapper">
+              {cameraActive ? (
+                <img
+                  src={`${BACKEND_URL}/video_feed`}
+                  alt="Live video feed"
+                  className="live-video"
+                />
+              ) : (
+                <div className="video-placeholder">
+                  <svg
+                    className="camera-icon"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    />
+                  </svg>
+                  <p>Camera is off</p>
+                </div>
+              )}
+            </div>
+
+            <div className="action-buttons">
+              {!cameraActive ? (
+                <button className="detect-button" onClick={startCamera}>
+                  Start Camera
+                </button>
+              ) : (
+                <button className="reset-button" onClick={stopCamera}>
+                  Stop Camera
+                </button>
+              )}
+            </div>
+
+            {error && (
+              <div className="error-message">
+                {error}
+              </div>
+            )}
+
+            {liveDetection && cameraActive && (
+              <div className="results-container">
+                <h2 className="results-title">Live Detection</h2>
+                {liveDetection.gollum_found ? (
+                  <div className="gollum-found">GOLLUM FOUND</div>
+                ) : (
+                  <div className="gollum-not-found">gollum not found</div>
+                )}
               </div>
             )}
           </div>

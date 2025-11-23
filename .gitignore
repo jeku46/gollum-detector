@@ -53,3 +53,14 @@ coverage/
 venv/
 *.pyc
 __pycache__/
+*.egg-info/
+
+# YOLO / ML Training
+runs/
+*.pt
+Gollum-Finder-*/
+datasets/
+*.cache
+
+# Ultralytics
+.ultralytics/

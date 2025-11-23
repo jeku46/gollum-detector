@@ -19,6 +19,8 @@ function App() {
   // Live detection state
   const [cameraActive, setCameraActive] = useState(false)
   const [liveDetection, setLiveDetection] = useState(null)
+  const [lastGollumSpotted, setLastGollumSpotted] = useState(null)
+  const [confidence, setConfidence] = useState(0.1)
   const socketRef = useRef(null)
 
   const handleImageSelect = async (file) => {
@@ -151,6 +153,9 @@ function App() {
       socketRef.current.on('detection', (data) => {
         console.log('Detection event:', data)
         setLiveDetection(data)
+        if (data.gollum_found) {
+          setLastGollumSpotted(new Date(data.timestamp * 1000))
+        }
       })
 
       return () => {
@@ -190,6 +195,19 @@ function App() {
     } catch (err) {
       console.error('Failed to stop camera:', err)
       setError('Failed to stop camera')
+    }
+  }
+
+  const updateConfidence = async (newConfidence) => {
+    setConfidence(newConfidence)
+    try {
+      await fetch(`${BACKEND_URL}/set_confidence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confidence: newConfidence })
+      })
+    } catch (err) {
+      console.error('Failed to update confidence:', err)
     }
   }
 
@@ -355,6 +373,20 @@ function App() {
               )}
             </div>
 
+            <div className="confidence-slider">
+              <label htmlFor="confidence">
+                Confidence: {(confidence * 100).toFixed(0)}%
+              </label>
+              <input
+                type="range"
+                id="confidence"
+                min="0"
+                max="100"
+                value={confidence * 100}
+                onChange={(e) => updateConfidence(e.target.value / 100)}
+              />
+            </div>
+
             {error && (
               <div className="error-message">
                 {error}
@@ -368,6 +400,11 @@ function App() {
                   <div className="gollum-found">GOLLUM FOUND</div>
                 ) : (
                   <div className="gollum-not-found">gollum not found</div>
+                )}
+                {lastGollumSpotted && (
+                  <div className="last-spotted">
+                    Last spotted: {lastGollumSpotted.toLocaleTimeString()}
+                  </div>
                 )}
               </div>
             )}

@@ -1,7 +1,8 @@
 """
 Gollum Detection Server using locally trained YOLO model
+Supports both local webcam and IP camera (phone) sources
 """
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from ultralytics import YOLO
@@ -24,6 +25,8 @@ cap = None
 camera_active = False
 last_gollum_state = None
 detection_thread = None
+camera_source = None  # 0 for webcam, URL string for IP camera
+confidence_threshold = 0.1  # Default confidence threshold
 
 # LED control configuration
 LED_BASE_URL = "http://10.0.0.106:5000"
@@ -62,7 +65,7 @@ def detection_loop():
             continue
 
         # Run detection
-        results = model(frame, conf=0.90, verbose=False)
+        results = model(frame, conf=confidence_threshold, verbose=False)
 
         # Get annotated frame
         annotated_frame = results[0].plot()
@@ -132,13 +135,22 @@ def video_feed():
 
 @app.route('/start_camera', methods=['POST'])
 def start_camera():
-    """Start the camera and detection"""
-    global model, cap, camera_active, last_gollum_state, detection_thread
+    """Start the camera and detection
+
+    Optional JSON body:
+    - camera_url: URL for IP camera (e.g., "http://192.168.1.100:8080/video")
+                  If not provided, uses local webcam (device 0)
+    """
+    global model, cap, camera_active, last_gollum_state, detection_thread, camera_source
 
     if camera_active:
         return jsonify({'status': 'already_running'})
 
     try:
+        # Get camera source from request
+        data = request.get_json() or {}
+        camera_url = data.get('camera_url')
+
         # Reset state
         last_gollum_state = None
 
@@ -156,10 +168,28 @@ def start_camera():
             model = YOLO(MODEL_PATH)
             print(f"Model loaded! Classes: {model.names}")
 
-        # Open camera
-        cap = cv2.VideoCapture(0)
+        # Open camera - IP camera URL, device index, or default webcam
+        device_index = data.get('device_index')
+
+        if camera_url:
+            print(f"Connecting to IP camera: {camera_url}")
+            camera_source = camera_url
+            cap = cv2.VideoCapture(camera_url)
+        elif device_index is not None:
+            print(f"Using camera device {device_index}")
+            camera_source = f"device:{device_index}"
+            cap = cv2.VideoCapture(int(device_index))
+        else:
+            print("Using default webcam (device 0)")
+            camera_source = 0
+            cap = cv2.VideoCapture(0)
+
         if not cap.isOpened():
-            return jsonify({'status': 'error', 'message': 'Could not open camera'}), 500
+            camera_source = None
+            return jsonify({
+                'status': 'error',
+                'message': f'Could not open camera: {camera_url or "webcam"}'
+            }), 500
 
         camera_active = True
 
@@ -167,7 +197,11 @@ def start_camera():
         detection_thread = threading.Thread(target=detection_loop, daemon=True)
         detection_thread.start()
 
-        return jsonify({'status': 'started'})
+        source_description = camera_url if camera_url else (f'device:{device_index}' if device_index is not None else 'webcam')
+        return jsonify({
+            'status': 'started',
+            'camera_source': source_description
+        })
     except Exception as e:
         print(f"Error starting camera: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -175,7 +209,7 @@ def start_camera():
 @app.route('/stop_camera', methods=['POST'])
 def stop_camera():
     """Stop the camera and detection"""
-    global cap, camera_active, last_gollum_state
+    global cap, camera_active, last_gollum_state, camera_source
 
     if not camera_active:
         return jsonify({'status': 'not_running'})
@@ -192,6 +226,7 @@ def stop_camera():
             cap = None
 
         last_gollum_state = None
+        camera_source = None
 
         # Turn off all LEDs
         turn_off_all_leds()
@@ -208,8 +243,32 @@ def status():
         'camera_active': camera_active,
         'gollum_found': last_gollum_state,
         'model_loaded': model is not None,
-        'model_path': MODEL_PATH
+        'model_path': MODEL_PATH,
+        'camera_source': camera_source if camera_source != 0 else 'webcam',
+        'confidence': confidence_threshold
     })
+
+@app.route('/set_confidence', methods=['POST'])
+def set_confidence():
+    """Set the detection confidence threshold"""
+    global confidence_threshold
+
+    data = request.get_json() or {}
+    new_confidence = data.get('confidence')
+
+    if new_confidence is None:
+        return jsonify({'status': 'error', 'message': 'confidence is required'}), 400
+
+    try:
+        new_confidence = float(new_confidence)
+        if not 0.0 <= new_confidence <= 1.0:
+            return jsonify({'status': 'error', 'message': 'confidence must be between 0 and 1'}), 400
+
+        confidence_threshold = new_confidence
+        print(f"Confidence threshold updated to: {confidence_threshold}")
+        return jsonify({'status': 'updated', 'confidence': confidence_threshold})
+    except ValueError:
+        return jsonify({'status': 'error', 'message': 'invalid confidence value'}), 400
 
 @socketio.on('connect')
 def handle_connect():
